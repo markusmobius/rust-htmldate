@@ -4,16 +4,16 @@ Native Rust publication and modification date extraction, following
 [Python htmldate](https://github.com/adbar/htmldate) through the Python-qualified
 [Go-HtmlDate](https://github.com/markusmobius/go-htmldate) implementation.
 
-**v1.10.1 review candidate, not tagged or released.** This is a Git source
-distribution; there is no crates.io publication. Python decides date behavior.
+**RustHtmlDate v1.10.1** is distributed as Git source, not through crates.io.
+Python decides date behavior.
 The implementation runs on the caller's thread, with no runtime Go/Python bridge,
 unsafe Rust, internal worker threads, or parallel batch processing.
 
 | Component | Reference |
 | --- | --- |
-| Go-HtmlDate review | `0f04a39fb476a75744ed948bfcd887306ca3f187` |
+| Go-HtmlDate v1.10.1 | `0f04a39fb476a75744ed948bfcd887306ca3f187` |
 | Go DateParser / Dateutil | Published v1.4.7 / v2.9.1 |
-| Python htmldate | v1.10.0, `b8952828329abaeeb3be21387b526f2be614ce67` |
+| Python htmldate reference | `b8952828329abaeeb3be21387b526f2be614ce67` |
 | Python dateparser | v1.4.3 |
 | CPython / python-dateutil | 3.14.6 / 2.9.0.post0 |
 | Rust DateParser | Published v1.4.7, `1e3e2feccd8662113e4092ca87a5567e4e23bc3c` |
@@ -22,7 +22,7 @@ unsafe Rust, internal worker threads, or parallel batch processing.
 
 ## Usage
 
-For review, use the Git branch rather than a nonexistent release tag:
+Add the Git source dependency:
 
 ```toml
 [dependencies]
@@ -59,6 +59,90 @@ at UTC midnight. The optional Go-derived time extension also fills `has_time`,
 `has_timezone`, and the selected time/offset; Python htmldate has no corresponding
 time-extraction API. `src_string` is the selected native source fragment, not a
 Python return value. `is_zero()` indicates no date.
+
+## Performance
+
+Measured on **2026-09-14**, comparing RustHtmlDate **v1.10.1** (`538e08d`)
+with the equivalent Go-HtmlDate **v1.10.1** (`0f04a39`) on the same
+**1,000 pre-parsed DOMs**. Each cell is the median of **eight timed runs**,
+with one complete corpus pass per run: **64 timed passes total**. HTML parsing,
+file loading and network requests are excluded. Go was measured alongside Rust
+in this run, not reused from an earlier benchmark.
+
+| Mode | Go v1.10.1, ms/1,000 pages | Rust v1.10.1, ms/1,000 pages | Go / Rust |
+| :--- | ------------------------: | --------------------------: | --------: |
+| Publication, fast | 232.51 | 163.69 | 1.42x |
+| Publication, extensive | 585.21 | 347.65 | 1.68x |
+| Last modified, fast | 322.03 | 170.76 | 1.89x |
+| Last modified, extensive | 794.11 | 298.84 | 2.66x |
+
+The multiplier is the Go median divided by the Rust median; above 1 means Rust
+takes less time. Individual timings vary and ranges overlap, so these are corpus
+measurements, not guaranteed production speedups. The [raw report](tools/benchmark-v1.10.1.json)
+retains every sample, ranges, execution order, source identities and corpus hashes.
+
+Both engines ran on an AMD Ryzen AI 7 PRO 350 under Linux/WSL2, with one extraction
+caller pinned to logical CPU 2. Rust used 1.98.1 in the standard release profile;
+Go used 1.27.1 with `GOMAXPROCS=1`, `CGO_ENABLED=0`, `GOAMD64=v1` and default
+garbage collection. Each retains its locked dependencies, including its native
+DateParser v1.4.7 and Dateutil v2.9.1 implementations.
+
+The [runner](tools/benchmark.py) keeps one process per engine alive, parsing the
+corpus once per process. Eight untimed warmups precede timing, one per engine/mode.
+Go/Rust order alternates within adjacent pairs and mode order varies between
+rounds; only one engine extracts at a time. Every completed sample is saved
+immediately. Only `from_document` / `FromDocument` is timed, including date parsing
+and DOM operations; validation and result formatting are outside the timer.
+All DOM outputs match between engines and remained stable across the timed passes.
+
+Both engines receive identical CRLF-to-LF-normalized bytes. Bounds are fixed at
+`1995-01-01` through the end of `2026-09-13`, with a reference time of
+`2026-09-13T12:00:00Z`, UTC, no explicit URL and time extraction disabled.
+
+To reproduce under Linux/WSL, use Python 3.12+, Git, Go 1.27.1, Rust 1.98.1 and a
+Go-HtmlDate checkout containing the source revision and current comparison runner.
+Fetch the locked Rust dependencies once, then run:
+
+```sh
+cargo fetch --locked --target x86_64-unknown-linux-gnu
+python3 tools/benchmark.py --go /path/to/go-htmldate --cpu 2 --output /tmp/htmldate-rust-go.json
+```
+
+Choose an available logical CPU and a new output path. The committed report also
+supplies the independent Python expectations and labels for the accuracy check;
+Python htmldate is not needed to replay them. Failed runs retain completed samples
+and are not retried automatically.
+
+## Comparison with Original
+
+Checked on **2026-09-14**, RustHtmlDate **v1.10.1** and the
+[Python reference](https://github.com/adbar/htmldate/commit/b895282) produce identical
+dates on the 1,000-entry comparison corpus in all four modes:
+**4,000/4,000 matching outputs**. The corpus contains 725 BBAW entries and 275
+from the [Data Culture Group](https://dataculturegroup.org); repeated entries are retained.
+
+Publication-date scores use the same corrected upstream labels as Go, including
+its 42 label corrections since v1.9.3. Remaining `NaN` labels count as nonmatching
+references, following the upstream evaluation.
+
+| Implementation | Mode | Precision | Recall | Accuracy | F-Score |
+| :------------- | :--- | --------: | -----: | -------: | ------: |
+| Python reference (`b895282`) | Fast | 0.924 | 0.927 | 0.861 | 0.925 |
+| Python reference (`b895282`) | Extensive | 0.908 | 0.993 | 0.903 | 0.949 |
+| Rust v1.10.1 | Fast | 0.924 | 0.927 | 0.861 | 0.925 |
+| Rust v1.10.1 | Extensive | 0.908 | 0.993 | 0.903 | 0.949 |
+
+This is a correctness comparison through `from_reader`, including HTML repair,
+not a timing measurement. It uses the same frozen settings as the benchmark,
+CPython 3.14.6, Python dateparser 1.4.3 and python-dateutil 2.9.0.post0. Expectations
+come from the independently verified [reference fixture](testdata/python-reference.json),
+with the four corpus files absent from that fixture checked directly against the
+pinned Python implementation. All current Rust outputs were checked separately;
+the [report](tools/benchmark-v1.10.1.json) retains the expectations, results and counts.
+
+The scores apply to publication dates only. The corpus has no modified-date ground
+truth, so agreement with Python in modified mode does not establish accuracy.
+Matching Python includes reproducing its incorrect publication-date choices.
 
 ## Date Semantics
 
@@ -107,8 +191,7 @@ content; this project does not relicense that content.
 
 The original Go fixtures retain their `a83e1a9` / DateParser v1.4.5 provenance.
 They now guard input inventory and 929 Go-only time cases, not obsolete Go date
-quirks. Runtime rules were regenerated from the qualified `0f04a39` Go candidate.
-No new benchmarks or performance claims accompany this candidate.
+quirks. Runtime rules follow the qualified Go v1.10.1 implementation at `0f04a39`.
 
 Another 24 Python-checked HTML regressions cover local Unix references, mixed
 text/timestamp selection and date-only bounds in UTC, Eastern and Kolkata
