@@ -136,7 +136,7 @@ fn find(document: &mut Cow<'_, Document>, options: &Options) -> Option<Candidate
         {
             for child in &document.nodes[index].children {
                 let node = &document.nodes[*child];
-                if node.removed || node.kind != crate::dom::Kind::Text {
+                if document.is_removed(*child) || node.kind != crate::dom::Kind::Text {
                     continue;
                 }
                 let text = normalize(&node.data);

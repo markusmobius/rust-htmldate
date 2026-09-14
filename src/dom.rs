@@ -1,5 +1,6 @@
 use html5ever::{parse_document, tendril::TendrilSink, tokenizer::TokenizerOpts, ParseOpts};
 use markup5ever_rcdom::{NodeData, RcDom};
+use std::sync::Arc;
 
 pub(crate) fn repair_html(mut content: String) -> String {
     static PATTERNS: std::sync::OnceLock<[regex::Regex; 2]> = std::sync::OnceLock::new();
@@ -28,7 +29,8 @@ pub(crate) fn repair_html(mut content: String) -> String {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Document {
-    pub(crate) nodes: Vec<Node>,
+    pub(crate) nodes: Arc<[Node]>,
+    removed: Vec<bool>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -48,7 +50,6 @@ pub(crate) struct Node {
     pub attrs: Vec<(String, String)>,
     pub children: Vec<usize>,
     pub parent: Option<usize>,
-    pub removed: bool,
 }
 
 impl Node {
@@ -80,7 +81,6 @@ impl Document {
                 attrs: Vec::new(),
                 children: Vec::new(),
                 parent,
-                removed: false,
             };
             let mut children = handle.children.borrow().clone();
             match &handle.data {
@@ -152,14 +152,17 @@ impl Document {
             }
             pending.extend(children.into_iter().rev().map(|child| (child, Some(index))));
         }
-        Self { nodes }
+        Self {
+            removed: vec![false; nodes.len()],
+            nodes: nodes.into(),
+        }
     }
 
     pub(crate) fn elements(&self) -> impl Iterator<Item = usize> + '_ {
         self.nodes
             .iter()
             .enumerate()
-            .filter(|(_, node)| !node.removed && node.kind == Kind::Element)
+            .filter(|(index, node)| !self.removed[*index] && node.kind == Kind::Element)
             .map(|(index, _)| index)
     }
 
@@ -169,12 +172,16 @@ impl Document {
             .collect()
     }
 
+    pub(crate) fn is_removed(&self, index: usize) -> bool {
+        self.removed[index]
+    }
+
     pub(crate) fn text(&self, index: usize) -> String {
         let mut result = String::new();
         let mut pending = vec![index];
         while let Some(index) = pending.pop() {
             let node = &self.nodes[index];
-            if node.removed {
+            if self.removed[index] {
                 continue;
             }
             if node.kind == Kind::Text {
@@ -189,7 +196,7 @@ impl Document {
         let mut result = String::new();
         for child in &self.nodes[index].children {
             let node = &self.nodes[*child];
-            if node.removed {
+            if self.removed[*child] {
                 continue;
             }
             if node.kind == Kind::Element {
@@ -205,7 +212,7 @@ impl Document {
     pub(crate) fn remove(&mut self, index: usize) {
         let mut pending = vec![index];
         while let Some(index) = pending.pop() {
-            self.nodes[index].removed = true;
+            self.removed[index] = true;
             pending.extend(self.nodes[index].children.iter());
         }
     }
@@ -233,7 +240,7 @@ impl Document {
         let mut output = String::new();
         while let Some((index, closing)) = pending.pop() {
             let node = &self.nodes[index];
-            if node.removed {
+            if self.removed[index] {
                 continue;
             }
             if closing {
@@ -340,6 +347,26 @@ fn escape(text: &str, output: &mut String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cloned_documents_share_nodes_but_not_pruning() {
+        let document = Document::parse(
+            "<html><body><div>Discard <span>child</span></div><p>Keep</p></body></html>",
+        );
+        let original = document.to_html();
+        let mut pruned = document.clone();
+        assert!(Arc::ptr_eq(&document.nodes, &pruned.nodes));
+        pruned.remove(pruned.tagged("div")[0]);
+        assert_eq!(document.to_html(), original);
+        assert_eq!(document.tagged("span").len(), 1);
+        assert!(pruned.tagged("span").is_empty());
+        assert!(!pruned.to_html().contains("Discard"));
+        assert!(pruned.to_html().contains("Keep"));
+        let mut second = pruned.clone();
+        second.remove(second.tagged("p")[0]);
+        assert!(pruned.to_html().contains("Keep"));
+        assert!(!second.to_html().contains("Keep"));
+    }
 
     #[test]
     fn python_html_repairs_and_root_serialization() {

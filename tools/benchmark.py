@@ -1,4 +1,4 @@
-"""Compare Rust and Go v1.10.1 with 64 serial DOM-only passes, then check Python parity."""
+"""Compare Rust and Go with interleaved DOM-only passes, then check Python parity."""
 
 import argparse
 from datetime import datetime, timezone
@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import random
 import shutil
 import signal
 import statistics
@@ -102,15 +103,33 @@ def scores(labels, outcomes):
     }
 
 
-def summarize(samples):
+def interleaved_schedule(engines, cohorts, runs, seed):
+    cells = [(engine, cohort) for cohort in cohorts for engine in engines]
+    if len(cells) != 8 or len(set(cells)) != 8 or runs < 1:
+        raise ValueError("interleaving requires eight unique cases and positive runs")
+    generator = random.Random(seed)
+    pattern = [0, 1, 7, 2, 6, 3, 5, 4]
+    schedule = []
+    while len(schedule) < runs:
+        generator.shuffle(cells)
+        offsets = list(range(8))
+        generator.shuffle(offsets)
+        for offset in offsets:
+            schedule.append([cells[(position + offset) % 8] for position in pattern])
+            if len(schedule) == runs:
+                break
+    return schedule
+
+
+def summarize(samples, runs):
     summary = {}
     for cohort in COHORTS:
         summary[cohort] = {}
         for engine in ("Go", "Rust"):
             timings = [sample["pass_ms"] for sample in samples
                        if sample["cohort"] == cohort and sample["engine"] == engine]
-            if len(timings) != 8:
-                raise RuntimeError("Expected exactly eight timed passes per cell")
+            if len(timings) != runs:
+                raise RuntimeError(f"Expected exactly {runs} timed passes per cell")
             summary[cohort][engine] = {
                 "median_ms": statistics.median(timings),
                 "range_ms": [min(timings), max(timings)], "samples_ms": timings,
@@ -124,6 +143,11 @@ def summarize(samples):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--go", type=Path, required=True, help="Go HtmlDate checkout with its comparison runner")
+    parser.add_argument("--go-binary", type=Path, help="prebuilt Go comparison binary; supply with --rust-binary")
+    parser.add_argument("--rust-binary", type=Path, help="prebuilt Rust benchmark example; supply with --go-binary")
+    parser.add_argument("--runs", type=int, default=8, help="timed corpus passes per engine and mode")
+    parser.add_argument("--seed", type=int, default=20260914)
+    parser.add_argument("--timeout-seconds", type=int, default=7100)
     parser.add_argument("--cpu", type=int, default=2)
     parser.add_argument("--cargo", default=str(Path.home() / ".cargo/bin/cargo"))
     parser.add_argument("--reference", type=Path, default=ROOT / "tools/benchmark-v1.10.1.json")
@@ -132,6 +156,10 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     arguments = parser.parse_args()
     arguments.go = arguments.go.resolve()
+    if bool(arguments.go_binary) != bool(arguments.rust_binary):
+        parser.error("supply --go-binary and --rust-binary together")
+    if arguments.runs < 2 or arguments.timeout_seconds < 1:
+        parser.error("runs must be at least two and timeout must be positive")
     if bool(arguments.python_evidence) != bool(arguments.labels):
         parser.error("supply --python-evidence and --labels together")
     if arguments.output.exists():
@@ -156,10 +184,12 @@ def main():
     environment["CARGO_TARGET_DIR"] = str(ROOT / "target")
     goroot = helper.capture(["go", "env", "GOROOT"], arguments.go, environment).strip()
     environment["ZONEINFO"] = str(Path(goroot) / "lib/time/zoneinfo.zip")
-    helper.capture(["git", "diff", "--ignore-cr-at-eol", "--exit-code", RUST_COMMIT, "--", "Cargo.toml", "Cargo.lock",
-                    "rust-toolchain.toml", "src", "data"], ROOT, environment)
+    if not arguments.go_binary:
+        helper.capture(["git", "diff", "--ignore-cr-at-eol", "--exit-code", RUST_COMMIT, "--", "Cargo.toml", "Cargo.lock",
+                        "rust-toolchain.toml", "src", "data"], ROOT, environment)
     started = time.monotonic()
-    deadline = started + 360
+    deadline = started + arguments.timeout_seconds
+    schedule = interleaved_schedule(["Go", "Rust"], COHORTS, arguments.runs, arguments.seed)
     signal.signal(signal.SIGALRM, helper.timeout_expired)
     signal.signal(signal.SIGTERM, helper.timeout_expired)
     report = {
@@ -167,7 +197,10 @@ def main():
         "cpu": next(line.split(":", 1)[1].strip() for line in Path("/proc/cpuinfo").read_text().splitlines()
                     if line.startswith("model name")),
         "cpu_affinity": [arguments.cpu], "environment": settings, "status": "in-progress",
-        "runs_per_engine_and_cohort": 8, "total_timed_passes": 64,
+        "runs_per_engine_and_cohort": arguments.runs, "total_timed_passes": 8 * arguments.runs,
+        "timeout_seconds": arguments.timeout_seconds,
+        "interleaving": {"seed": arguments.seed, "schedule": schedule,
+                 "method": "All eight cases once per round; randomized eight-round blocks balance position and directed within-round predecessors."},
         "processes": "One persistent process per engine; all 1000 DOMs parsed once per process.",
         "warmup": "One untimed DOM pass per engine/mode; eight warmups before timing.",
         "timing": "Extraction only; file reads, initial HTML parsing, formatting and validation excluded.",
@@ -203,20 +236,27 @@ def main():
                 content = destination.read_bytes().replace(b"\r\n", b"\n")
                 if len(content) != fixture["bytes"] or hashlib.sha256(content).hexdigest() != fixture["sha256"]:
                     raise RuntimeError(f"Canonical corpus changed: {fixture['file']}")
-            print("Build pinned Go v1.10.1 and Rust v1.10.1 release benchmark", flush=True)
-            go_binary, report["source_references"]["Go"] = helper.build(
-                "Go-v1.10.1", GO_COMMIT, work, environment, "git",
-            )
-            build = [arguments.cargo, "+1.98.1", "build", "--release", "--locked", "--offline", "--example", "benchmark"]
-            subprocess.run(build, cwd=ROOT, env=environment, check=True, timeout=180)
-            rust_binary = ROOT / "target/release/examples/benchmark"
-            report["source_references"]["Rust"] = {
-                "commit": RUST_COMMIT, "cargo_lock_sha256": digest(ROOT / "Cargo.lock"),
-                "cargo_toml_sha256": digest(ROOT / "Cargo.toml"), "binary_sha256": digest(rust_binary),
-                "build_command": build,
-                "rustc": helper.capture([str(Path(arguments.cargo).with_name("rustc")), "+1.98.1", "--version", "--verbose"],
-                                         ROOT, environment).strip(),
-            }
+            if arguments.go_binary:
+                go_binary, rust_binary = arguments.go_binary.resolve(), arguments.rust_binary.resolve()
+                report["source_references"] = {
+                    engine: {"prebuilt_binary": str(binary), "binary_sha256": digest(binary)}
+                    for engine, binary in (("Go", go_binary), ("Rust", rust_binary))
+                }
+            else:
+                print("Build pinned Go v1.10.1 and Rust v1.10.1 release benchmark", flush=True)
+                go_binary, report["source_references"]["Go"] = helper.build(
+                    "Go-v1.10.1", GO_COMMIT, work, environment, "git",
+                )
+                build = [arguments.cargo, "+1.98.1", "build", "--release", "--locked", "--offline", "--example", "benchmark"]
+                subprocess.run(build, cwd=ROOT, env=environment, check=True, timeout=180)
+                rust_binary = ROOT / "target/release/examples/benchmark"
+                report["source_references"]["Rust"] = {
+                    "commit": RUST_COMMIT, "cargo_lock_sha256": digest(ROOT / "Cargo.lock"),
+                    "cargo_toml_sha256": digest(ROOT / "Cargo.toml"), "binary_sha256": digest(rust_binary),
+                    "build_command": build,
+                    "rustc": helper.capture([str(Path(arguments.cargo).with_name("rustc")), "+1.98.1", "--version", "--verbose"],
+                                             ROOT, environment).strip(),
+                }
             commands = {
                 "Go": [str(go_binary), "-benchmark", "document", "-passes", "1", "-corpus-root", str(corpus),
                        "-min-date", "1995-01-01", "-max-date", "2026-09-13", "-current-time", "2026-09-13T12:00:00Z"],
@@ -238,26 +278,23 @@ def main():
                 for engine, worker in workers.items():
                     print(f"Warmup {engine} {cohort}", flush=True)
                     result = helper.measure(worker, cohort, True, deadline)
+                    if "profile" in result:
+                        raise RuntimeError("Use uninstrumented benchmark binaries")
                     report["warmup_metadata"][f"{engine}/{cohort}"] = result["metadata"]
                     report["dom_outcomes"][f"{engine}/{cohort}"] = [outcome["date"] for outcome in result["results"]]
                     helper.save_report(arguments.output, report)
-            for round_index in range(8):
-                cohorts = list(COHORTS[round_index % 4:] + COHORTS[:round_index % 4])
-                engines = list(workers)
-                if round_index % 2:
-                    cohorts.reverse()
-                    engines.reverse()
-                for cohort in cohorts:
-                    for engine in engines:
-                        result = helper.measure(workers[engine], cohort, False, deadline)
-                        if result["metadata"] != report["warmup_metadata"][f"{engine}/{cohort}"]:
-                            raise RuntimeError("Outputs or settings changed during timing")
-                        result.pop("results", None)
-                        result.update(round=round_index + 1, engine=engine, cohort=cohort)
-                        report["samples"].append(result)
-                        helper.save_report(arguments.output, report)
-                        print(f"{len(report['samples'])}/64 {engine} {cohort}: {result['pass_ms']:.2f} ms/pass", flush=True)
-            report["summary"] = summarize(report["samples"])
+            for round_index, order in enumerate(schedule):
+                for position, (engine, cohort) in enumerate(order, 1):
+                    result = helper.measure(workers[engine], cohort, False, deadline)
+                    if result["metadata"] != report["warmup_metadata"][f"{engine}/{cohort}"]:
+                        raise RuntimeError("Outputs or settings changed during timing")
+                    result.pop("results", None)
+                    result.update(round=round_index + 1, position=position, engine=engine, cohort=cohort)
+                    report["samples"].append(result)
+                    helper.save_report(arguments.output, report)
+                    if len(report["samples"]) % 40 == 0 or len(report["samples"]) == report["total_timed_passes"]:
+                        print(f"{len(report['samples'])}/{report['total_timed_passes']} {engine} {cohort}: {result['pass_ms']:.2f} ms/pass", flush=True)
+            report["summary"] = summarize(report["samples"], arguments.runs)
             report["benchmark_elapsed_seconds"] = time.monotonic() - started
             accuracy = {"cases": 4000, "path": "from_reader, outside the timed benchmark", "outcomes": {}, "differences": [], "summary": {}}
             for cohort in COHORTS:
@@ -307,7 +344,7 @@ def main():
     for cohort, result in report["summary"].items():
         print(f"{cohort}: Go {result['Go']['median_ms']:.2f} ms, Rust {result['Rust']['median_ms']:.2f} ms, "
               f"Go/Rust {result['go_over_rust_time']:.3f}x", flush=True)
-    print(f"Completed 64 timed passes in {report['benchmark_elapsed_seconds']:.1f}s; "
+    print(f"Completed {report['total_timed_passes']} timed passes in {report['benchmark_elapsed_seconds']:.1f}s; "
           f"Rust/Python agreement {report['accuracy']['matching_outputs']}/4000", flush=True)
     print(json.dumps(report["accuracy"]["summary"], indent=2), flush=True)
 
