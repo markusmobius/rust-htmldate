@@ -11,7 +11,7 @@ mod search;
 mod upstream_tests;
 
 use chrono::{DateTime, TimeZone};
-pub use dom::Document;
+pub use dom::{Document, TreeAttribute, TreeAttributeRef, TreeNode, TreeNodeRef, TreeSource};
 pub use rust_dateparser::{Configuration as DateParserConfiguration, Timezone};
 use std::io::{self, Read};
 use unicode_normalization::UnicodeNormalization;
@@ -79,6 +79,11 @@ pub fn from_html(html: &str, options: &Options) -> ExtractionResult {
 
 pub fn from_document(document: &Document, options: &Options) -> ExtractionResult {
     extract::run(std::borrow::Cow::Borrowed(document), options)
+}
+
+pub fn from_tree_source(source: &impl TreeSource, options: &Options) -> ExtractionResult {
+    let document = Document::import_source(source, |text| text);
+    extract::run(std::borrow::Cow::Owned(document), options)
 }
 
 pub fn from_reader(mut reader: impl Read, options: &Options) -> io::Result<ExtractionResult> {

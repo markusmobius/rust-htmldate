@@ -15,7 +15,10 @@ use crate::{
 
 pub(crate) type Candidate = (String, DateTime<Timezone>);
 
-pub(crate) fn run(mut document: Cow<'_, Document>, options: &Options) -> ExtractionResult {
+pub(crate) fn run<Text: AsRef<str> + Clone>(
+    mut document: Cow<'_, Document<Text>>,
+    options: &Options,
+) -> ExtractionResult {
     let mut options = options.with_defaults();
     if options.url.is_empty() {
         options.url = document
@@ -44,7 +47,10 @@ pub(crate) fn run(mut document: Cow<'_, Document>, options: &Options) -> Extract
     result
 }
 
-fn find(document: &mut Cow<'_, Document>, options: &Options) -> Option<Candidate> {
+fn find<Text: AsRef<str> + Clone>(
+    document: &mut Cow<'_, Document<Text>>,
+    options: &Options,
+) -> Option<Candidate> {
     let url = url_date(&options.url, options).map(|date| (options.url.clone(), date));
     if !options.defer_url_extractor && url.is_some() {
         return url;
@@ -67,7 +73,7 @@ fn find(document: &mut Cow<'_, Document>, options: &Options) -> Option<Candidate
         .filter(|index| {
             let node = &document.nodes[*index];
             matches!(
-                node.tag.as_str(),
+                node.tag.as_ref(),
                 "object"
                     | "embed"
                     | "applet"
@@ -86,7 +92,7 @@ fn find(document: &mut Cow<'_, Document>, options: &Options) -> Option<Candidate
                     | "svg"
                     | "track"
                     | "video"
-            ) || (node.tag == "div" && matches!(node.attr("id"), "wm-ipp-base" | "wm-ipp"))
+            ) || (node.tag.as_ref() == "div" && matches!(node.attr("id"), "wm-ipp-base" | "wm-ipp"))
         })
         .collect();
     for index in unwanted {
@@ -101,7 +107,7 @@ fn find(document: &mut Cow<'_, Document>, options: &Options) -> Option<Candidate
     }
     let titles: Vec<_> = document
         .elements()
-        .filter(|index| matches!(document.nodes[*index].tag.as_str(), "title" | "h1"))
+        .filter(|index| matches!(document.nodes[*index].tag.as_ref(), "title" | "h1"))
         .collect();
     if let Some(candidate) = other_elements(document, &titles, options) {
         return Some(candidate);
@@ -132,14 +138,14 @@ fn find(document: &mut Cow<'_, Document>, options: &Options) -> Option<Candidate
         let mut reference = Reference::default();
         for index in document
             .elements()
-            .filter(|index| free_text_tag(&document.nodes[*index].tag))
+            .filter(|index| free_text_tag(document.nodes[*index].tag.as_ref()))
         {
             for child in &document.nodes[index].children {
                 let node = &document.nodes[*child];
                 if document.is_removed(*child) || node.kind != crate::dom::Kind::Text {
                     continue;
                 }
-                let text = normalize(&node.data);
+                let text = normalize(node.data.as_ref());
                 if (7..52).contains(&text.chars().count()) {
                     reference.text(&text, options);
                 }
@@ -158,7 +164,7 @@ fn attempted(text: &str, options: &Options) -> Option<Candidate> {
     date.map(|date| (source, date))
 }
 
-fn metadata(document: &Document, options: &Options) -> Option<Candidate> {
+fn metadata(document: &Document<impl AsRef<str>>, options: &Options) -> Option<Candidate> {
     let mut reserve = None;
     for index in document.tagged("meta") {
         let node = &document.nodes[index];
@@ -238,7 +244,7 @@ fn metadata(document: &Document, options: &Options) -> Option<Candidate> {
     reserve
 }
 
-fn json(document: &Document, options: &Options) -> Option<Candidate> {
+fn json(document: &Document<impl AsRef<str>>, options: &Options) -> Option<Candidate> {
     static PATTERNS: OnceLock<[Regex; 2]> = OnceLock::new();
     let patterns = PATTERNS.get_or_init(|| {
         ["dateModified", "datePublished"].map(|name| {
@@ -313,7 +319,7 @@ impl Reference {
     }
 }
 
-fn abbreviations(document: &Document, options: &Options) -> Option<Candidate> {
+fn abbreviations(document: &Document<impl AsRef<str>>, options: &Options) -> Option<Candidate> {
     let elements = document.tagged("abbr");
     if elements.is_empty() || elements.len() >= 1000 {
         return None;
@@ -355,7 +361,7 @@ fn abbreviations(document: &Document, options: &Options) -> Option<Candidate> {
         .or_else(|| other_elements(document, &elements, options))
 }
 
-fn time_elements(document: &Document, options: &Options) -> Option<Candidate> {
+fn time_elements(document: &Document<impl AsRef<str>>, options: &Options) -> Option<Candidate> {
     let elements = document.tagged("time");
     if elements.is_empty() || elements.len() >= 1000 {
         return None;
@@ -390,7 +396,11 @@ fn time_elements(document: &Document, options: &Options) -> Option<Candidate> {
     reference.finish(options)
 }
 
-fn other_elements(document: &Document, elements: &[usize], options: &Options) -> Option<Candidate> {
+fn other_elements(
+    document: &Document<impl AsRef<str>>,
+    elements: &[usize],
+    options: &Options,
+) -> Option<Candidate> {
     if elements.is_empty() || elements.len() >= 1000 {
         return None;
     }
@@ -420,11 +430,11 @@ pub(crate) fn free_text_tag(tag: &str) -> bool {
     )
 }
 
-fn date_element(node: &Node, fast: bool) -> bool {
-    if matches!(node.tag.as_str(), "footer" | "small") {
+fn date_element(node: &Node<impl AsRef<str>>, fast: bool) -> bool {
+    if matches!(node.tag.as_ref(), "footer" | "small") {
         return true;
     }
-    if fast && !free_text_tag(&node.tag) {
+    if fast && !free_text_tag(node.tag.as_ref()) {
         return false;
     }
     let id = node.attr("id");
@@ -432,8 +442,8 @@ fn date_element(node: &Node, fast: bool) -> bool {
     let first = |names: &[&str]| {
         node.attrs
             .iter()
-            .find(|(name, _)| names.contains(&name.as_str()))
-            .map_or("", |(_, value)| value.as_str())
+            .find(|(name, _)| names.contains(&name.as_ref()))
+            .map_or("", |(_, value)| value.as_ref())
     };
     let id_class = first(&["id", "class"]);
     let date = first(&["id", "class", "itemprop"]).replace('D', "d");

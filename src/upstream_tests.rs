@@ -208,6 +208,7 @@ fn python_html() {
 }
 
 #[test]
+#[ignore = "requires testdata/python-pages.tar.gz from the GitHub source release"]
 fn python_saved_pages() {
     python_cases(&["file"]);
 }
