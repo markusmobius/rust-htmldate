@@ -4,13 +4,14 @@ Native Rust publication and modification date extraction, following
 [Python htmldate](https://github.com/adbar/htmldate) through the Python-qualified
 [Go-HtmlDate](https://github.com/markusmobius/go-htmldate) implementation.
 
-**RustHtmlDate v1.10.1** is distributed as Git source, not through crates.io.
+**RustHtmlDate v1.10.2** is available on
+[crates.io](https://crates.io/crates/rust-htmldate/1.10.2) and as a tagged GitHub source release.
 Python decides date behavior.
 The implementation runs on the caller's thread, with no runtime Go/Python bridge,
 unsafe Rust, internal worker threads, or parallel batch processing.
 
-v1.10.1 includes shared-node DOM pruning to avoid full-tree copies, updated
-DateParser v1.4.7 and Dateutil v2.9.1 libraries, and Python date-selection fixes.
+v1.10.2 adds owned-tree import for native integrations. It retains shared-node
+DOM pruning, DateParser v1.4.7, Dateutil v2.9.1, and the Python date-selection rules.
 
 | Component | Reference |
 | --- | --- |
@@ -25,12 +26,16 @@ DateParser v1.4.7 and Dateutil v2.9.1 libraries, and Python date-selection fixes
 
 ## Usage
 
-Add the Git source dependency:
+Add the crates.io dependency:
 
 ```toml
 [dependencies]
-rust-htmldate = { git = "https://github.com/markusmobius/rust-htmldate", branch = "main" }
+rust-htmldate = "=1.10.2"
 ```
+
+The registry package uses Rust-DateParser 1.4.7 and Rust-Dateutil 2.9.1 from
+crates.io. The [tagged GitHub source release](https://github.com/markusmobius/rust-htmldate/releases/tag/v1.10.2)
+retains the pinned Git dependency revisions.
 
 ```rust
 use rust_htmldate::{from_html, Options};
@@ -62,6 +67,22 @@ at UTC midnight. The optional Go-derived time extension also fills `has_time`,
 `has_timezone`, and the selected time/offset; Python htmldate has no corresponding
 time-extraction API. `src_string` is the selected native source fragment, not a
 Python return value. `is_zero()` indicates no date.
+
+## Tree Import
+
+Version 1.10.2 provides `Document::from_tree`, `TreeNode`, and `TreeAttribute`.
+
+The constructor consumes a neutral owned tree without HTML parsing, repair,
+text normalization, or attribute sorting. It preserves child order, comments,
+duplicate attributes and namespace prefixes. `TreeAttribute::name` is the local
+name used for lookup; `namespace` is the optional prefix used when rendering.
+Non-document roots are wrapped in a document node, without inserting HTML,
+head or body elements. Import is iterative and uses the existing immutable
+shared-node storage; extraction retains its independent pruning state.
+
+Consumers provide their own adapter to these records. HtmlDate does not depend
+on Trafilatura, DomDistiller, or Readability, and its extraction algorithm and
+existing input APIs are unchanged.
 
 ## Performance
 
@@ -198,10 +219,13 @@ present with their options and raw source hashes; 81 audit cases cover ISO weeks
 Unicode, offset bounds, local-name snapshots, and folds. Four Python exceptions
 are checked for a safe no-date result, not identical exception text.
 
-The bundled compressed saved pages are replayed with CRLF normalized to LF and
-verified against separate canonical hashes. Original raw hashes remain as
-provenance. The saved pages are upstream test inputs containing third-party
-content; this project does not relicense that content.
+The compressed saved-page archive is included in the GitHub source release but
+excluded from the crates.io package to meet its size limit. The remaining
+fixtures and regression tests are included in both distributions. The saved-page
+test is opt-in and runs explicitly in CI on Linux and Windows. It replays pages
+with CRLF normalized to LF and verifies separate canonical hashes. Original raw
+hashes remain as provenance. The saved pages are upstream test inputs containing
+third-party content; this project does not relicense that content.
 
 The original Go fixtures retain their `a83e1a9` / DateParser v1.4.5 provenance.
 They now guard input inventory and 929 Go-only time cases, not obsolete Go date
@@ -219,6 +243,16 @@ cargo test --locked
 cargo test --locked --release
 cargo clippy --locked --all-targets -- -D warnings
 ```
+
+With `testdata/python-pages.tar.gz` from the GitHub source release present,
+also run the full saved-page comparison:
+
+```sh
+cargo test --locked --release upstream_tests::python_saved_pages -- --ignored --exact
+```
+
+The original v1.10.1 Git tag retains its default saved-page test; the registry
+package marks that test opt-in so its normal tests work without the archive.
 
 To independently re-execute Python, use CPython 3.14.6 and the exact versions in
 `tools/python-requirements.txt`:
@@ -239,10 +273,9 @@ Python evidence; it never derives expected dates from Go or Rust. The separate
 Go exporter has `-current-rules` mode, which updates rule data only and leaves
 historical result fixtures intact. Development tools are not runtime dependencies.
 
-The Git-only DateParser/Dateutil dependencies currently prevent crates.io package
-resolution. Verify the intended source distribution with a clean Git archive
-and `cargo test --locked`; do not replace dependencies to claim registry packaging
-support.
+Cargo registry packaging resolves the exact DateParser/Dateutil version
+requirements from crates.io. Git source builds continue to use the pinned
+revisions. Both distributions contain the same runtime implementation.
 
 ## API And Environment
 
