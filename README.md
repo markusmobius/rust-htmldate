@@ -4,14 +4,18 @@ Native Rust publication and modification date extraction, following
 [Python htmldate](https://github.com/adbar/htmldate) through the Python-qualified
 [Go-HtmlDate](https://github.com/markusmobius/go-htmldate) implementation.
 
-**RustHtmlDate v1.10.2** is available on
-[crates.io](https://crates.io/crates/rust-htmldate/1.10.2) and as a tagged GitHub source release.
+**RustHtmlDate v1.10.3** is available on
+[crates.io](https://crates.io/crates/rust-htmldate/1.10.3) and as a tagged GitHub source release.
 Python decides date behavior.
 The implementation runs on the caller's thread, with no runtime Go/Python bridge,
 unsafe Rust, internal worker threads, or parallel batch processing.
 
-v1.10.2 adds owned-tree import for native integrations. It retains shared-node
-DOM pruning, DateParser v1.4.7, Dateutil v2.9.1, and the Python date-selection rules.
+v1.10.3 changes dependency requirements only: Rust-DateParser and Rust-Dateutil
+use compatible (`^`) requirements instead of exact (`=`) pins, Rust-DateParser
+moves to v1.4.9 (unchanged parsing results), and Windows builds use `winreg` 0.56,
+which shares `windows-sys` 0.61 with sibling crates. v1.10.2 added owned-tree
+import for native integrations. Shared-node DOM pruning and the Python
+date-selection rules are unchanged.
 
 | Component | Reference |
 | --- | --- |
@@ -20,7 +24,7 @@ DOM pruning, DateParser v1.4.7, Dateutil v2.9.1, and the Python date-selection r
 | Python htmldate reference | `b8952828329abaeeb3be21387b526f2be614ce67` |
 | Python dateparser | v1.4.3 |
 | CPython / python-dateutil | 3.14.6 / 2.9.0.post0 |
-| Rust DateParser | Published v1.4.7, `1e3e2feccd8662113e4092ca87a5567e4e23bc3c` |
+| Rust DateParser | Published v1.4.9, `f8901a078be0be4e846b05c49375e60a58f185d7` |
 | Rust Dateutil | Published v2.9.1, `3a7537dd3a4e223756fa31fb1941a10da4c78b30` |
 | Rust toolchain | 1.98.1 |
 
@@ -30,11 +34,11 @@ Add the crates.io dependency:
 
 ```toml
 [dependencies]
-rust-htmldate = "=1.10.2"
+rust-htmldate = "=1.10.3"
 ```
 
-The registry package uses Rust-DateParser 1.4.7 and Rust-Dateutil 2.9.1 from
-crates.io. The [tagged GitHub source release](https://github.com/markusmobius/rust-htmldate/releases/tag/v1.10.2)
+The registry package requires Rust-DateParser `^1.4.9` and Rust-Dateutil
+`^2.9.1` from crates.io. The [tagged GitHub source release](https://github.com/markusmobius/rust-htmldate/releases/tag/v1.10.3)
 retains the pinned Git dependency revisions.
 
 ```rust
@@ -273,7 +277,7 @@ Python evidence; it never derives expected dates from Go or Rust. The separate
 Go exporter has `-current-rules` mode, which updates rule data only and leaves
 historical result fixtures intact. Development tools are not runtime dependencies.
 
-Cargo registry packaging resolves the exact DateParser/Dateutil version
+Cargo registry packaging resolves compatible (`^`) DateParser/Dateutil version
 requirements from crates.io. Git source builds continue to use the pinned
 revisions. Both distributions contain the same runtime implementation.
 

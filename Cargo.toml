@@ -1,6 +1,6 @@
 [package]
 name = "rust-htmldate"
-version = "1.10.2"
+version = "1.10.3"
 edition = "2021"
 rust-version = "1.98.1"
 description = "Native Rust publication and modification date extraction following Python htmldate"
@@ -17,14 +17,14 @@ html5ever = "0.39"
 iana-time-zone = "0.1.64"
 markup5ever_rcdom = "0.39"
 regex = "1.12"
-rust-dateparser = { git = "https://github.com/markusmobius/rust-dateparser", rev = "1e3e2feccd8662113e4092ca87a5567e4e23bc3c", version = "=1.4.7" }
-rust-dateutil = { git = "https://github.com/markusmobius/rust-dateutil", rev = "3a7537dd3a4e223756fa31fb1941a10da4c78b30", version = "=2.9.1" }
+rust-dateparser = { git = "https://github.com/markusmobius/rust-dateparser", rev = "f8901a078be0be4e846b05c49375e60a58f185d7", version = "1.4.9" }
+rust-dateutil = { git = "https://github.com/markusmobius/rust-dateutil", rev = "3a7537dd3a4e223756fa31fb1941a10da4c78b30", version = "2.9.1" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 unicode-normalization = "0.1"
 
 [target.'cfg(windows)'.dependencies]
-winreg = "0.55"
+winreg = "0.56"
 
 [dev-dependencies]
 flate2 = "1"

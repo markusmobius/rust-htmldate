@@ -577,8 +577,8 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "rust-dateparser"
-version = "1.4.7"
-source = "git+https://github.com/markusmobius/rust-dateparser?rev=1e3e2feccd8662113e4092ca87a5567e4e23bc3c#1e3e2feccd8662113e4092ca87a5567e4e23bc3c"
+version = "1.4.9"
+source = "git+https://github.com/markusmobius/rust-dateparser?rev=f8901a078be0be4e846b05c49375e60a58f185d7#f8901a078be0be4e846b05c49375e60a58f185d7"
 dependencies = [
  "aho-corasick",
  "chrono",
@@ -602,7 +602,7 @@ dependencies = [
 
 [[package]]
 name = "rust-htmldate"
-version = "1.10.2"
+version = "1.10.3"
 dependencies = [
  "chardetng",
  "chrono",
@@ -1038,9 +1038,9 @@ checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
 
 [[package]]
 name = "winreg"
-version = "0.55.0"
+version = "0.56.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb5a765337c50e9ec252c2069be9bf91c7df47afb103b642ba3a53bf8101be97"
+checksum = "7d6f32a0ff4a9f6f01231eb2059cc85479330739333e0e58cadf03b6af2cca10"
 dependencies = [
  "cfg-if",
  "windows-sys",
